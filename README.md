@@ -2,8 +2,12 @@
 
 Site do projeto de extensão do **IFSul Campus Passo Fundo**. Cada árvore plantada recebe uma placa com QR Code que leva a uma página pública, onde qualquer pessoa vê **quando a árvore foi regada pela última vez** e pode registrar uma rega na hora.
 
-> **Status:** M1 concluído (esqueleto, Docker Compose, modelo, migrations e seed).
-> Próximos: M2 página pública e rega, M3 admin, QR e etiquetas, M4 mapa.
+> **Status:** M1 a M4 concluídos: modelo e seed; página pública com selo e registro de rega; admin com chuva, QR e etiquetas; mapa público.
+> Veja [Pendências](#pendências) para o que depende de informação externa.
+
+| Atrasada | Regada agora | Aguardando plantio |
+| :---: | :---: | :---: |
+| ![Selo vermelho](docs/img/tree-red.png) | ![Rega registrada](docs/img/tree-watered.png) | ![Muda aguardando local](docs/img/tree-awaiting.png) |
 
 ---
 
@@ -39,6 +43,8 @@ Os testes rodam contra um PostgreSQL real (não SQLite), usando as migrations do
 docker compose --profile test run --rm tests
 ```
 
+Os testes cobrem a regra do selo, o rate limit e o intervalo mínimo, a geração de QR (decodificada com zxing-cpp, conferindo URL e nível H), o PDF de etiquetas (lido com pypdf), a autenticação, as fotos (remoção de EXIF) e a validação de GeoJSON.
+
 Fora do Docker (Python 3.12 e um Postgres local com o banco `arvores_test`):
 
 ```bash
@@ -61,6 +67,149 @@ alembic revision --autogenerate -m "descricao"   # revise o arquivo gerado antes
 Python 3.12 · FastAPI · PostgreSQL 16 · SQLAlchemy 2 (async, asyncpg) · Alembic · Pydantic v2 · HTML/CSS/JS vanilla (ES modules) · Leaflet · segno (QR) · reportlab (PDF) · pytest · Docker Compose.
 
 As dependências diretas estão fixadas em `requirements.txt`. O conjunto completo resolvido para Python 3.12 está em `requirements.lock`, usado como constraint no build.
+
+---
+
+## Página pública da árvore (`/a/{public_id}`)
+
+- Foto, nome popular e científico, código e idade ("plantada há 12 dias").
+- **Selo de rega:** "Regada há 1 dia (ontem, 08:10)", em verde, amarelo, vermelho ou cinza. Tem sempre ícone e texto, nunca só a cor.
+- **Botão "Reguei agora"**, com nome opcional. A resposta do servidor já traz o selo atualizado.
+- Últimas regas, timeline de fotos, sobre a espécie (campos vazios aparecem como "informação em revisão"), origem e mini-mapa.
+- Árvore aguardando plantio mostra só "Esta muda ainda aguarda o local de plantio", sem selo. Árvore morta mostra uma mensagem própria.
+- Feita para o celular e para ler ao sol: tema claro, alto contraste, fonte grande e botão de rega com 72 px de altura.
+
+### Regra do selo
+
+Função pura em `app/services/watering.py` (`compute_badge`), testada em `tests/test_watering_badge.py`.
+
+| Cor | Quando |
+|---|---|
+| Cinza | Nenhum registro de rega ou chuva |
+| Verde | Tempo desde a última água < `BADGE_WARN_RATIO` × intervalo (padrão 75%) |
+| Amarelo | Entre 75% e 100% do intervalo |
+| Vermelho | Passou do intervalo |
+
+- **"Última água"** é a mais recente entre a última rega e a última chuva registrada (`rain_events`). Chuva anterior ao plantio não conta.
+- **O intervalo** vem de `watering_rules`: "recém-plantada" até `phase_until_days` após o plantio, "estabelecida" depois disso. **Os valores atuais são PLACEHOLDER: confirmar com NUGAI/Engenharia.**
+
+### Proteções do registro público de rega
+
+| Proteção | Como |
+|---|---|
+| Intervalo mínimo por árvore | `MIN_WATERING_INTERVAL_HOURS` (padrão 3 h). Responde 409 com "já foi regada às 08:10" e o selo atual. A linha da árvore é travada (`SELECT … FOR UPDATE`) para que duas regas simultâneas não passem juntas |
+| Rate limit por IP | `WATERING_RATE_LIMIT_COUNT` regas a cada `WATERING_RATE_LIMIT_WINDOW_MINUTES`. Responde 429 com `Retry-After`. A contagem fica no Postgres, então funciona com mais de um worker |
+| IP | Só o HMAC-SHA256 com `IP_HASH_SALT` é guardado, nunca o IP. Atrás de proxy reverso, configure `FORWARDED_ALLOW_IPS` |
+| Honeypot | Campo `website` escondido. Se vier preenchido, a resposta finge sucesso e nada é gravado |
+| Validação | Nome opcional com até 60 caracteres; caracteres de controle removidos |
+| Headers | CSP restritiva (só scripts do próprio site), `nosniff`, `Referrer-Policy` |
+
+### API pública
+
+| Método | Rota | |
+|---|---|---|
+| GET | `/api/config` | Centro do mapa, zoom e `BASE_URL` |
+| GET | `/api/map/trees` | GeoJSON das árvores plantadas, com a cor do selo |
+| GET | `/api/map/zones` | GeoJSON das zonas que já têm polígono |
+| GET | `/api/trees/{public_id}` | Dados da página (selo, regas, fotos, espécie, origem) |
+| POST | `/api/trees/{public_id}/waterings` | `{"name": "Ana"}`. Responde 201, 409 (intervalo mínimo / árvore não plantada), 429 (rate limit) ou 404 |
+
+---
+
+## Mapa (`/mapa`)
+
+`/` redireciona para cá.
+
+| Visão geral | Card da árvore |
+| :---: | :---: |
+| ![Mapa](docs/img/map.png) | ![Card](docs/img/map-popup.png) |
+
+- **Camadas:** satélite (Esri World Imagery) e OpenStreetMap. No celular, o seletor vira um botão compacto.
+- **Enquadramento:** o mapa começa centralizado em `MAP_CENTER` e, quando há dados, se ajusta à zona e às árvores.
+- **Polígonos** das zonas, em amarelo.
+- **Um marcador por árvore plantada** (status `planted` ou `attention`), colorido pelo selo de rega. Mudas aguardando plantio e árvores mortas não aparecem. Os selos do mapa saem da mesma função da página da árvore, calculados em lote (número fixo de consultas).
+- **Card ao tocar no marcador:** espécie, código, selo e o botão “Ver árvore e registrar rega”.
+- **Lista abaixo do mapa,** com resumo (“4 árvores plantadas · 1 precisando de água”) e o botão “Ver no mapa”. Funciona também com leitor de tela ou quando os tiles não carregam.
+- **`/mapa#{public_id}`** abre direto o card daquela árvore. É o link “Abrir no mapa do campus” da página da árvore.
+
+---
+
+## Admin (`/admin`)
+
+Login com usuário e senha (JWT, senha em argon2id). O usuário inicial vem de `ADMIN_USERNAME` e `ADMIN_PASSWORD` no seed. Depois de 5 senhas erradas, o IP fica bloqueado por 15 minutos.
+
+| Tela | O que faz |
+|---|---|
+| Árvores | Lista com status, lote, zona e selo de rega; cadastro de nova muda (código ARV-NNN automático) |
+| Árvore | **Marcar como plantada** com data e local (toque no mapa ou 📍 “Usar minha posição” no celular, que exige HTTPS); editar dados e status; fotos; cuidados (adubação, poda, e excluir regas falsas); QR em PNG/SVG |
+| Espécies | Cadastro e revisão. Campo vazio aparece como “informação em revisão”; foto da espécie |
+| Zona | Desenhar e editar o polígono no mapa de satélite (tocar para adicionar ponto, arrastar para mover, tocar no ponto para remover) ou **importar GeoJSON** (Polygon/MultiPolygon, Feature ou FeatureCollection com 1 polígono) |
+| Chuva e regras | Botão **🌧️ Choveu** (vale para todas as árvores); regras de rega com a marcação “confirmado pela NUGAI/Engenharia”; data da doação |
+| QR e etiquetas | PDF A4 com 6 etiquetas por folha (QR + código + nome), só com árvores plantadas; mostra a `BASE_URL` e alerta se ela for local |
+
+| Árvore no admin | Polígono da zona | Etiquetas (PDF A4) |
+| :---: | :---: | :---: |
+| ![Admin árvore](docs/img/admin-tree.png) | ![Admin zona](docs/img/admin-zone.png) | ![Etiquetas](docs/img/labels-pdf.png) |
+
+Decisões do M3:
+
+- **QR e etiquetas:**
+  - Saem para árvores com status `planted` e também `attention`, porque uma árvore em atenção continua plantada e mantém a placa.
+  - O PDF e os downloads usam a mesma geração (segno, nível H), e os testes decodificam o QR para conferir a URL.
+  - **O nome científico só vai para a etiqueta quando a espécie está “Revisado”**, porque a placa é permanente.
+- **Fotos:**
+  - O tipo é validado pelo conteúdo, não pela extensão. A imagem é rotacionada conforme o EXIF, reduzida para no máximo 1600 px e regravada como JPEG **sem nenhum metadado** (GPS, aparelho).
+  - A data da foto vem do EXIF quando existe.
+  - O limite de tamanho é `MAX_UPLOAD_MB`.
+- **Horários digitados no admin** (sem fuso) são tratados como horário de São Paulo e gravados em UTC.
+- **Exclusão de árvore:** só vale para muda aguardando plantio e sem histórico. Para árvore plantada que se perdeu, use o status “morta”, porque a placa pode já existir.
+- **Editor de polígono próprio**, de cerca de 100 linhas sobre o Leaflet, em vez do Leaflet.draw. Assim não depende de `window.L` global nem de ordem de carregamento de scripts.
+
+### API do admin (Bearer JWT)
+
+| Método | Rota |
+|---|---|
+| POST | `/api/admin/login` |
+| GET/POST | `/api/admin/trees` · GET/PATCH/DELETE `/api/admin/trees/{id}` |
+| POST | `/api/admin/trees/{id}/plant` (`planted_at`, `lat`, `lng`, `zone_id?`) |
+| GET/POST/DELETE | `/api/admin/trees/{id}/photos[/{photo_id}]` |
+| GET/POST/DELETE | `/api/admin/trees/{id}/care-events[/{event_id}]` |
+| GET | `/api/admin/trees/{id}/qr.png` · `/qr.svg` |
+| GET | `/api/admin/labels.pdf[?ids=1&ids=6]` |
+| GET/POST/PATCH/DELETE | `/api/admin/species[/{id}]` · POST `/api/admin/species/{id}/photo` |
+| GET/POST/PATCH | `/api/admin/origins[/{id}]` |
+| GET/PATCH | `/api/admin/zones[/{id}]` · PUT `/api/admin/zones/{id}/geojson` |
+| GET/POST/DELETE | `/api/admin/rain-events[/{id}]` |
+| GET/PATCH | `/api/admin/watering-rules[/{id}]` |
+
+Documentação interativa em `/docs`.
+
+---
+
+## Colocando no ar
+
+1. **Domínio definitivo e HTTPS** antes de imprimir qualquer placa (veja o aviso sobre a `BASE_URL`). O HTTPS também é exigido pelo “Usar minha posição” do admin.
+2. **Proxy reverso** (Caddy ou nginx) na frente da app, com HTTPS.
+   - Defina `FORWARDED_ALLOW_IPS` com o IP do proxy para que o rate limit veja o IP real de quem rega.
+   - Não exponha a porta 8000 diretamente.
+3. **Segredos:** gere `SECRET_KEY` e `IP_HASH_SALT` aleatórios e troque `ADMIN_PASSWORD`.
+   - Se o `IP_HASH_SALT` mudar, o rate limit apenas “esquece” os hashes antigos.
+4. **Backup** dos dois volumes: `pgdata` (banco) e `uploads` (fotos). Por exemplo, `docker compose exec db pg_dump -U arvores arvores > backup.sql` e uma cópia da pasta de uploads.
+5. **Um processo da app** (o padrão do compose). O bloqueio de login fica em memória; o rate limit das regas fica no banco e não depende disso.
+
+---
+
+## Pendências
+
+Itens que dependem de informação externa. O sistema funciona sem eles e mostra “em revisão” ou o aviso de placeholder.
+
+- [ ] **Intervalos de rega** (recém-plantada e estabelecida, e quando uma vira a outra): confirmar com NUGAI/Engenharia e marcar “confirmado” no admin.
+- [ ] **Dados das espécies** (descrição, porte, raiz, frutos, curiosidade) e confirmação dos nomes científicos: preencher e marcar “Revisado”.
+- [ ] **Data da doação** do Vale Natural Garden Center.
+- [ ] **`MAP_CENTER`** com a coordenada real do campus (hoje é um placeholder no centro de Passo Fundo).
+- [ ] **Polígono da Zona 1:** desenhar no admin ou importar GeoJSON.
+- [ ] **`BASE_URL`** definitiva.
+- [ ] **M5 (opcional):** chuva automática via Open-Meteo para `MAP_CENTER`. O modelo já está pronto (`rain_events.source = automatic`); falta o job e o limiar de milímetros, que também é decisão da NUGAI/Engenharia.
 
 ---
 
@@ -103,5 +252,12 @@ app/
   seed.py
 alembic/     migrations
 tests/
-web/         frontend (a partir do M2)
+  schemas/   Pydantic (entrada e saída da API)
+  services/  regras puras (selo, textos, GeoJSON), rate limit, fotos, QR, PDF, montagem da página
+  routers/   rotas HTTP (público, mapa, admin)
+web/
+  tree.html, map.html, admin/index.html
+  js/        ES modules (type="module"); js/admin/ é o SPA do admin
+  css/
+  vendor/    Leaflet 1.9.4 servido localmente (sem CDN)
 ```

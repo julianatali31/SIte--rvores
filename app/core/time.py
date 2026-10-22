@@ -17,3 +17,8 @@ def to_local(dt: datetime) -> datetime:
     if dt.tzinfo is None:
         raise ValueError("naive datetime: all datetimes must be timezone-aware")
     return dt.astimezone(local_tz())
+
+
+def assume_local(dt: datetime) -> datetime:
+    """Naive datetimes typed in the admin are São Paulo local time."""
+    return dt.replace(tzinfo=local_tz()) if dt.tzinfo is None else dt

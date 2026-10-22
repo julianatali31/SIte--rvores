@@ -23,7 +23,6 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 720
     ip_hash_salt: str = Field(default="dev-only-change-me", min_length=16)
-    trust_proxy_headers: bool = False
 
     min_watering_interval_hours: float = 3.0
     watering_rate_limit_count: int = 10

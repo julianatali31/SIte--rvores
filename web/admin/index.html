@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Admin · Plantando Ideias</title>
+  <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="/static/css/base.css">
+  <link rel="stylesheet" href="/static/css/admin.css">
+  <script type="module" src="/static/js/admin/main.js" defer></script>
+</head>
+<body class="admin">
+  <header class="topbar">
+    <span class="brand">🌱 Plantando Ideias · Admin</span>
+    <nav id="nav" class="nav" hidden>
+      <a href="#/arvores">Árvores</a>
+      <a href="#/especies">Espécies</a>
+      <a href="#/zona">Zona</a>
+      <a href="#/chuva">Chuva e regras</a>
+      <a href="#/etiquetas">QR e etiquetas</a>
+      <button type="button" id="logout" class="link">Sair</button>
+    </nav>
+  </header>
+  <main id="view" class="admin-page" aria-live="polite"></main>
+</body>
+</html>

@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#1f5f3a">
+  <title>Mapa das árvores · Plantando Ideias</title>
+  <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="/static/css/base.css">
+  <link rel="stylesheet" href="/static/css/map.css">
+  <script type="module" src="/static/js/map.js" defer></script>
+</head>
+<body class="map-page">
+  <header class="topbar">
+    <span class="brand">🌱 Plantando Ideias</span>
+    <span class="brand-sub">Árvores do Campus · IFSul Passo Fundo</span>
+  </header>
+
+  <main>
+    <div id="map" class="campus-map" role="region" aria-label="Mapa das árvores plantadas no campus"></div>
+
+    <section class="map-panel page">
+      <ul class="legend" aria-label="Legenda do selo de rega">
+        <li><span class="dot dot-green"></span>Em dia</li>
+        <li><span class="dot dot-yellow"></span>Perto de vencer</li>
+        <li><span class="dot dot-red"></span>Precisa de água</li>
+        <li><span class="dot dot-grey"></span>Sem registro</li>
+        <li><span class="swatch-zone"></span>Zona de plantio</li>
+      </ul>
+      <h1>Árvores plantadas</h1>
+      <p id="summary" class="muted">Carregando…</p>
+      <ul id="tree-list" class="tree-list"></ul>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p>Projeto de extensão “Plantando Ideias — Árvores do Campus”, IFSul Campus Passo Fundo.</p>
+  </footer>
+</body>
+</html>
