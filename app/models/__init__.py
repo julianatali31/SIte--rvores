@@ -1,5 +1,6 @@
 from app.models.base import Base
 from app.models.care_event import CareEvent
+from app.models.login_attempt import LoginAttempt
 from app.models.origin import Origin
 from app.models.photo import Photo
 from app.models.rain_event import RainEvent
@@ -12,6 +13,7 @@ from app.models.zone import PlantingZone
 __all__ = [
     "Base",
     "CareEvent",
+    "LoginAttempt",
     "Origin",
     "Photo",
     "PlantingZone",

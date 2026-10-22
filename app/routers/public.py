@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.db import get_session
 from app.core.ids import PUBLIC_ID_ALPHABET, PUBLIC_ID_LENGTH
+from app.core.net import client_ip
 from app.core.time import local_tz, now_utc
 from app.models import CareEvent
 from app.models.enums import CareEventType, EventSource
@@ -31,7 +32,12 @@ def _valid_public_id(public_id: str) -> bool:
 async def public_config() -> dict:
     settings = get_settings()
     lat, lng = settings.map_center_latlng
-    return {"map_center": {"lat": lat, "lng": lng}, "map_zoom": settings.map_zoom, "base_url": settings.base_url}
+    return {
+        "map_center": {"lat": lat, "lng": lng},
+        "map_zoom": settings.map_zoom,
+        "base_url": settings.base_url,
+        "max_upload_mb": settings.max_upload_mb,
+    }
 
 
 @router.get("/a/{public_id}", include_in_schema=False)
@@ -78,7 +84,7 @@ async def register_watering(
     if tree.status not in WATERABLE:
         raise HTTPException(status.HTTP_409_CONFLICT, "Esta árvore não está recebendo registros de rega.")
 
-    ip_hash = hash_ip(request.client.host if request.client else None)
+    ip_hash = hash_ip(client_ip(request))
     limit = await check_ip_rate_limit(session, ip_hash, now)
     if not limit.allowed:
         return JSONResponse(

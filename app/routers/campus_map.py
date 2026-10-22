@@ -11,7 +11,8 @@ from app.core.db import get_session
 from app.core.time import now_utc
 from app.models import PlantingZone, Tree
 from app.models.enums import TREE_STATUS_LABELS, DataReviewStatus
-from app.services.tree_view import WATERABLE, badges_for, media_url
+from app.services.storage import media_url
+from app.services.tree_view import WATERABLE, badges_for
 
 WEB_DIR = Path(__file__).resolve().parents[2] / "web"
 router = APIRouter()

@@ -43,7 +43,7 @@ Os testes rodam contra um PostgreSQL real (não SQLite), usando as migrations do
 docker compose --profile test run --rm tests
 ```
 
-Os testes cobrem a regra do selo, o rate limit e o intervalo mínimo, a geração de QR (decodificada com zxing-cpp, conferindo URL e nível H), o PDF de etiquetas (lido com pypdf), a autenticação, as fotos (remoção de EXIF) e a validação de GeoJSON.
+Os testes cobrem as adaptações para a Vercel (URL do Neon, engine serverless, IP pelos cabeçalhos, fotos no Blob com SDK simulado), a regra do selo, o rate limit e o intervalo mínimo, a geração de QR (decodificada com zxing-cpp, conferindo URL e nível H), o PDF de etiquetas (lido com pypdf), a autenticação, as fotos (remoção de EXIF) e a validação de GeoJSON.
 
 Fora do Docker (Python 3.12 e um Postgres local com o banco `arvores_test`):
 
@@ -136,7 +136,7 @@ Função pura em `app/services/watering.py` (`compute_badge`), testada em `tests
 
 ## Admin (`/admin`)
 
-Login com usuário e senha (JWT, senha em argon2id). O usuário inicial vem de `ADMIN_USERNAME` e `ADMIN_PASSWORD` no seed. Depois de 5 senhas erradas, o IP fica bloqueado por 15 minutos.
+Login com usuário e senha (JWT, senha em argon2id). O usuário inicial vem de `ADMIN_USERNAME` e `ADMIN_PASSWORD` no seed. Depois de 5 senhas erradas, o IP fica bloqueado por 15 minutos (contagem guardada no banco).
 
 | Tela | O que faz |
 |---|---|
@@ -195,7 +195,57 @@ Documentação interativa em `/docs`.
 3. **Segredos:** gere `SECRET_KEY` e `IP_HASH_SALT` aleatórios e troque `ADMIN_PASSWORD`.
    - Se o `IP_HASH_SALT` mudar, o rate limit apenas “esquece” os hashes antigos.
 4. **Backup** dos dois volumes: `pgdata` (banco) e `uploads` (fotos). Por exemplo, `docker compose exec db pg_dump -U arvores arvores > backup.sql` e uma cópia da pasta de uploads.
-5. **Um processo da app** (o padrão do compose). O bloqueio de login fica em memória; o rate limit das regas fica no banco e não depende disso.
+5. O rate limit das regas e o bloqueio de login ficam no banco, então funcionam com vários processos ou instâncias.
+
+---
+
+## Publicando na Vercel
+
+A mesma base de código roda no Docker e na Vercel. Na Vercel, o app detecta `VERCEL=1` e passa a:
+
+| No Docker | Na Vercel |
+|---|---|
+| Pool de conexões com o Postgres local | Sem pool (`NullPool`) e sem cache de prepared statements, compatível com o pooler do **Neon** (PgBouncer em modo transaction) |
+| Fotos em disco (`/media/...`) | Fotos no **Vercel Blob** (URL pública absoluta). Ativado pela variável `BLOB_READ_WRITE_TOKEN` |
+| IP do cliente via `--proxy-headers` | IP do cliente via `x-real-ip` / `x-forwarded-for`, que a própria Vercel preenche |
+| Migrations no start do container | Migrations rodadas por você contra o Neon (passo 2) |
+
+O bloqueio de login fica no banco (tabela `login_attempts`) nos dois casos, para funcionar com várias instâncias.
+
+**Testado aqui:** 240 requisições concorrentes passando por um PgBouncer em modo transaction. A configuração normal (com pool) deu 187 erros 500 de prepared statement; a configuração serverless não deu nenhum.
+
+### Passo a passo
+
+1. **Banco no Neon:** crie um projeto (região **São Paulo, `sa-east-1`**) e copie duas connection strings:
+   - **pooled** (host com `-pooler`): é o `DATABASE_URL` do site;
+   - **direta** (sem `-pooler`): para as migrations.
+
+   Pode colar como o Neon entrega (`postgresql://…?sslmode=require&channel_binding=require`); o app converte para o formato do asyncpg.
+2. **Migrations e seed**, do seu computador, usando a URL **direta**:
+   ```bash
+   export DATABASE_URL="postgresql://…neon.tech/neondb?sslmode=require"
+   alembic upgrade head
+   ADMIN_USERNAME=admin ADMIN_PASSWORD="uma-senha-forte" python -m app.seed
+   ```
+   Repita o `alembic upgrade head` sempre que um PR trouxer uma migration nova.
+3. **Projeto na Vercel:** em *Add New → Project*, importe `julianatali31/SIte--rvores`. O FastAPI é detectado sozinho em `app/main.py`, e o `vercel.json` já inclui a pasta `web/` (HTML, CSS, JS) e exclui testes e docs do pacote.
+4. **Blob:** em *Storage → Create → Blob* (acesso **público**), conecte ao projeto. Isso cria `BLOB_READ_WRITE_TOKEN`.
+5. **Variáveis de ambiente** (*Settings → Environment Variables*, ambiente Production):
+
+   | Variável | Valor |
+   |---|---|
+   | `DATABASE_URL` | URL **pooled** do Neon |
+   | `SECRET_KEY` | `python -c "import secrets; print(secrets.token_urlsafe(48))"` |
+   | `IP_HASH_SALT` | outro valor gerado do mesmo jeito |
+   | `BASE_URL` | o domínio definitivo (passo 6), ex.: `https://arvores.passofundo.ifsul.edu.br` |
+   | `MAP_CENTER` | `lat,lng` do campus |
+   | `MAX_UPLOAD_MB` | `4` (a Vercel aceita ~4,5 MB por requisição; o admin reduz fotos maiores no navegador) |
+
+   Em produção (`VERCEL_ENV=production`), o app **se recusa a subir** se `SECRET_KEY` ou `IP_HASH_SALT` não estiverem definidos.
+6. **Domínio próprio** em *Settings → Domains*. O TI do campus cria um CNAME apontando para a Vercel, e o HTTPS é automático. **Use esse domínio como `BASE_URL`, nunca o `*.vercel.app`.**
+7. **Deploy:** cada push na `main` publica em produção, e cada PR ganha uma URL de prévia.
+
+> Prévias de PR usam as variáveis do ambiente *Preview*. Se apontarem para o mesmo banco de produção, regas feitas na prévia entram no banco real. Para testar à vontade, crie um branch do Neon só para as prévias.
 
 ---
 
@@ -225,6 +275,7 @@ Itens que dependem de informação externa. O sistema funciona sem eles e mostra
 | `rain_events` | Chuva no campus inteiro; conta como "última água" para o selo |
 | `photos` | Fotos por árvore (só o admin envia) |
 | `users` | Admin, senha em argon2id |
+| `login_attempts` | Tentativas de login erradas (hash do IP), para o bloqueio temporário |
 | `watering_rules` | Intervalo de rega por fase. **Valores do seed são PLACEHOLDER: confirmar com NUGAI/Engenharia** |
 
 **Seed:** ARV-001..005 araçá, ARV-006..010 cereja-do-mato, ARV-011..015 guabiju. O lote 1 (ARV-001, 006, 007 e 011) já está ligado à Zona 1. Todas começam em `awaiting_planting`.

@@ -1,6 +1,8 @@
 import { h } from '../../dom.js';
 import { adminApi } from '../http.js';
 import { busy, emptyToNull, field, select, toast } from '../ui.js';
+import { getConfig } from '../config.js';
+import { fitForUpload } from '../image.js';
 
 const REVIEW = [['pending', 'Pendente (mostra “em revisão”)'], ['reviewed', 'Revisado']];
 
@@ -64,12 +66,12 @@ export async function speciesForm(id) {
     const file = h('input', { type: 'file', accept: 'image/jpeg,image/png,image/webp' });
     const send = h('button', { type: 'submit', class: 'btn' }, 'Enviar foto da espécie');
     const photoForm = h('form', { class: 'card' }, h('h2', {}, 'Foto da espécie'),
-      sp.photo_path ? h('img', { class: 'species-photo', src: `/media/${sp.photo_path}`, alt: sp.common_name }) : h('p', { class: 'muted' }, 'Sem foto. A página usa a foto mais recente da árvore, se houver.'),
+      sp.photo_path ? h('img', { class: 'species-photo', src: /^https?:/.test(sp.photo_path) ? sp.photo_path : `/media/${sp.photo_path}`, alt: sp.common_name }) : h('p', { class: 'muted' }, 'Sem foto. A página usa a foto mais recente da árvore, se houver.'),
       field('Arquivo', file), send);
     photoForm.addEventListener('submit', busy(send, async () => {
       if (!file.files[0]) throw new Error('Escolha uma imagem.');
       const data = new FormData();
-      data.append('file', file.files[0]);
+      data.append('file', await fitForUpload(file.files[0], (await getConfig()).max_upload_mb));
       await adminApi(`/api/admin/species/${id}/photo`, { method: 'POST', form: data });
       toast('Foto enviada.');
       window.dispatchEvent(new HashChangeEvent('hashchange'));

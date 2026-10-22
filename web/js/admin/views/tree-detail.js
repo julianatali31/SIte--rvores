@@ -2,6 +2,7 @@ import { h } from '../../dom.js';
 import { createBaseMap, L, treeMarker, ZONE_STYLE } from '../../basemap.js';
 import { adminApi, adminBlob, download } from '../http.js';
 import { afterMount, getConfig } from '../config.js';
+import { fitForUpload } from '../image.js';
 import {
   badgeDot, busy, CARE_LABELS, emptyToNull, field, fmtDateTime, localInputValue,
   select, statusChip, STATUS_LABELS, toast,
@@ -133,8 +134,10 @@ async function photosCard(tree) {
     field('Data da foto', when, 'Vazio = data da câmera (EXIF) ou agora'), send);
   form.addEventListener('submit', busy(send, async () => {
     if (!fileInput.files[0]) throw new Error('Escolha uma foto.');
+    const config = await getConfig();
     const data = new FormData();
-    data.append('file', fileInput.files[0]);
+    // Reduced photos lose the camera date: fill "Data da foto" if it matters.
+    data.append('file', await fitForUpload(fileInput.files[0], config.max_upload_mb));
     if (caption.value.trim()) data.append('caption', caption.value.trim());
     if (when.value) data.append('taken_at', when.value);
     await adminApi(`/api/admin/trees/${tree.id}/photos`, { method: 'POST', form: data });

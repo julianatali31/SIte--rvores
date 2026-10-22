@@ -19,9 +19,10 @@ from app.routers import (
 WEB_DIR = Path(__file__).resolve().parents[1] / "web"
 
 TILE_HOSTS = "https://*.tile.openstreetmap.org https://server.arcgisonline.com"
+BLOB_HOSTS = "https://*.public.blob.vercel-storage.com"
 CSP = (
     "default-src 'self'; "
-    f"img-src 'self' data: blob: {TILE_HOSTS}; "
+    f"img-src 'self' data: blob: {TILE_HOSTS} {BLOB_HOSTS}; "
     "script-src 'self'; style-src 'self'; "
     "connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
 )
@@ -59,7 +60,9 @@ async def home():
 async def admin_page():
     return FileResponse(WEB_DIR / "admin" / "index.html")
 
-upload_dir = Path(get_settings().upload_dir)
-upload_dir.mkdir(parents=True, exist_ok=True)
-app.mount("/media", StaticFiles(directory=upload_dir), name="media")
+if get_settings().storage_backend == "local":
+    # On Vercel photos live in Blob (absolute URLs); the filesystem is read-only there.
+    upload_dir = Path(get_settings().upload_dir)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    app.mount("/media", StaticFiles(directory=upload_dir), name="media")
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")

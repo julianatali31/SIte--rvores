@@ -1,17 +1,16 @@
-"""Admin authentication: JWT bearer tokens + a small login brute-force guard."""
-import time
-from collections import defaultdict, deque
+"""Admin authentication: JWT bearer tokens + a login brute-force guard stored in the DB."""
 from datetime import timedelta
 
 import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.db import get_session
 from app.core.time import now_utc
-from app.models import User
+from app.models import LoginAttempt, User
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -59,32 +58,29 @@ async def current_admin(
     return user
 
 
-class LoginGuard:
-    """Failed logins per client (hashed IP). In-memory: fine for a single app process."""
-
-    def __init__(self, max_failures: int = LOGIN_MAX_FAILURES, window: int = LOGIN_WINDOW_SECONDS):
-        self.max_failures = max_failures
-        self.window = window
-        self._failures: dict[str, deque[float]] = defaultdict(deque)
-
-    def _prune(self, key: str, now: float) -> deque[float]:
-        q = self._failures[key]
-        while q and now - q[0] > self.window:
-            q.popleft()
-        return q
-
-    def retry_after(self, key: str) -> int:
-        now = time.monotonic()
-        q = self._prune(key, now)
-        if len(q) < self.max_failures:
-            return 0
-        return int(self.window - (now - q[0])) + 1
-
-    def fail(self, key: str) -> None:
-        self._failures[key].append(time.monotonic())
-
-    def reset(self, key: str) -> None:
-        self._failures.pop(key, None)
+async def login_retry_after(session: AsyncSession, key: str) -> int:
+    """Seconds until this client may try again (0 = allowed)."""
+    now = now_utc()
+    since = now - timedelta(seconds=LOGIN_WINDOW_SECONDS)
+    count, oldest = (
+        await session.execute(
+            select(func.count(), func.min(LoginAttempt.created_at)).where(
+                LoginAttempt.key_hash == key, LoginAttempt.created_at > since
+            )
+        )
+    ).one()
+    if count < LOGIN_MAX_FAILURES:
+        return 0
+    return max(int((oldest + timedelta(seconds=LOGIN_WINDOW_SECONDS) - now).total_seconds()) + 1, 1)
 
 
-login_guard = LoginGuard()
+async def record_login_failure(session: AsyncSession, key: str) -> None:
+    cutoff = now_utc() - timedelta(seconds=LOGIN_WINDOW_SECONDS)
+    await session.execute(delete(LoginAttempt).where(LoginAttempt.created_at < cutoff))
+    session.add(LoginAttempt(key_hash=key))
+    await session.commit()
+
+
+async def clear_login_failures(session: AsyncSession, key: str) -> None:
+    await session.execute(delete(LoginAttempt).where(LoginAttempt.key_hash == key))
+    await session.commit()

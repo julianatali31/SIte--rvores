@@ -2,8 +2,15 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import create_access_token, current_admin, login_guard
+from app.core.auth import (
+    clear_login_failures,
+    create_access_token,
+    current_admin,
+    login_retry_after,
+    record_login_failure,
+)
 from app.core.db import get_session
+from app.core.net import client_ip
 from app.core.security import hash_password, verify_password
 from app.models import User
 from app.schemas.admin import LoginIn, TokenOut
@@ -17,8 +24,8 @@ _DUMMY_HASH = hash_password("not-a-real-password")
 
 @router.post("/login", response_model=TokenOut)
 async def login(body: LoginIn, request: Request, session: AsyncSession = Depends(get_session)):
-    key = hash_ip(request.client.host if request.client else None) or "unknown"
-    wait = login_guard.retry_after(key)
+    key = hash_ip(client_ip(request)) or "unknown"
+    wait = await login_retry_after(session, key)
     if wait:
         raise HTTPException(
             status.HTTP_429_TOO_MANY_REQUESTS,
@@ -28,9 +35,9 @@ async def login(body: LoginIn, request: Request, session: AsyncSession = Depends
     user = (await session.execute(select(User).where(User.username == body.username))).scalar_one_or_none()
     ok = verify_password(user.password_hash if user else _DUMMY_HASH, body.password)
     if not (user and ok and user.is_active):
-        login_guard.fail(key)
+        await record_login_failure(session, key)
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Usuário ou senha incorretos.")
-    login_guard.reset(key)
+    await clear_login_failures(session, key)
     return TokenOut(access_token=create_access_token(user), username=user.username)
 
 
