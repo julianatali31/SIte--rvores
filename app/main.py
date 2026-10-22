@@ -1,10 +1,19 @@
 from pathlib import Path
 
 from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.core.config import get_settings
-from app.routers import public
+from app.routers import (
+    admin_auth,
+    admin_care,
+    admin_catalog,
+    admin_labels,
+    admin_trees,
+    admin_zones,
+    public,
+)
 
 WEB_DIR = Path(__file__).resolve().parents[1] / "web"
 
@@ -35,6 +44,13 @@ async def health() -> dict[str, str]:
 
 
 app.include_router(public.router)
+for module in (admin_auth, admin_catalog, admin_trees, admin_zones, admin_care, admin_labels):
+    app.include_router(module.router)
+
+
+@app.get("/admin", include_in_schema=False)
+async def admin_page():
+    return FileResponse(WEB_DIR / "admin" / "index.html")
 
 upload_dir = Path(get_settings().upload_dir)
 upload_dir.mkdir(parents=True, exist_ok=True)

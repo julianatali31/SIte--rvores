@@ -85,3 +85,39 @@ def settings(monkeypatch):
     from app.core.config import get_settings
 
     return get_settings()
+
+
+@pytest.fixture(autouse=True)
+def _reset_login_guard():
+    from app.core.auth import login_guard
+
+    login_guard._failures.clear()
+    yield
+    login_guard._failures.clear()
+
+
+@pytest.fixture(autouse=True)
+def _tmp_uploads(tmp_path, monkeypatch):
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "upload_dir", str(tmp_path / "uploads"))
+    return tmp_path / "uploads"
+
+
+@pytest.fixture
+async def admin(seeded, make_client):
+    """Logged-in admin client."""
+    client = make_client(ip="192.0.2.99")
+    r = await client.post("/api/admin/login", json={"username": "admin", "password": "test-password-123"})
+    assert r.status_code == 200, r.text
+    client.headers["Authorization"] = f"Bearer {r.json()['access_token']}"
+    yield client
+    await client.aclose()
+
+
+async def tree_id(session, code: str) -> int:
+    from sqlalchemy import select
+
+    from app.models import Tree
+
+    return await session.scalar(select(Tree.id).where(Tree.code == code))

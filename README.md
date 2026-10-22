@@ -2,8 +2,8 @@
 
 Site do projeto de extensão do **IFSul Campus Passo Fundo**. Cada árvore plantada recebe uma placa com QR Code que leva a uma página pública, onde qualquer pessoa vê **quando a árvore foi regada pela última vez** e pode registrar uma rega na hora.
 
-> **Status:** M1 (esqueleto, modelo, seed) e M2 (página pública, selo e registro de rega) concluídos.
-> Próximos: M3 admin, chuva manual, QR e etiquetas; M4 mapa.
+> **Status:** M1 (esqueleto, modelo, seed), M2 (página pública, selo e registro de rega) e M3 (admin, chuva, QR e etiquetas) concluídos.
+> Próximo: M4 mapa público.
 
 | Atrasada | Regada agora | Aguardando plantio |
 | :---: | :---: | :---: |
@@ -42,6 +42,8 @@ Os testes rodam contra um PostgreSQL real (não SQLite), usando as migrations do
 ```bash
 docker compose --profile test run --rm tests
 ```
+
+Os testes cobrem a regra do selo, o rate limit e o intervalo mínimo, a geração de QR (decodificada com zxing-cpp, conferindo URL e nível H), o PDF de etiquetas (lido com pypdf), a autenticação, as fotos (remoção de EXIF) e a validação de GeoJSON.
 
 Fora do Docker (Python 3.12 e um Postgres local com o banco `arvores_test`):
 
@@ -108,6 +110,58 @@ Função pura em `app/services/watering.py` (`compute_badge`), testada em `tests
 |---|---|---|
 | GET | `/api/trees/{public_id}` | Dados da página (selo, regas, fotos, espécie, origem) |
 | POST | `/api/trees/{public_id}/waterings` | `{"name": "Ana"}`. Responde 201, 409 (intervalo mínimo / árvore não plantada), 429 (rate limit) ou 404 |
+
+---
+
+## Admin (`/admin`)
+
+Login com usuário e senha (JWT, senha em argon2id). O usuário inicial vem de `ADMIN_USERNAME` e `ADMIN_PASSWORD` no seed. Depois de 5 senhas erradas, o IP fica bloqueado por 15 minutos.
+
+| Tela | O que faz |
+|---|---|
+| Árvores | Lista com status, lote, zona e selo de rega; cadastro de nova muda (código ARV-NNN automático) |
+| Árvore | **Marcar como plantada** com data e local (toque no mapa ou 📍 “Usar minha posição” no celular, que exige HTTPS); editar dados e status; fotos; cuidados (adubação, poda, e excluir regas falsas); QR em PNG/SVG |
+| Espécies | Cadastro e revisão. Campo vazio aparece como “informação em revisão”; foto da espécie |
+| Zona | Desenhar e editar o polígono no mapa de satélite (tocar para adicionar ponto, arrastar para mover, tocar no ponto para remover) ou **importar GeoJSON** (Polygon/MultiPolygon, Feature ou FeatureCollection com 1 polígono) |
+| Chuva e regras | Botão **🌧️ Choveu** (vale para todas as árvores); regras de rega com a marcação “confirmado pela NUGAI/Engenharia”; data da doação |
+| QR e etiquetas | PDF A4 com 6 etiquetas por folha (QR + código + nome), só com árvores plantadas; mostra a `BASE_URL` e alerta se ela for local |
+
+| Árvore no admin | Polígono da zona | Etiquetas (PDF A4) |
+| :---: | :---: | :---: |
+| ![Admin árvore](docs/img/admin-tree.png) | ![Admin zona](docs/img/admin-zone.png) | ![Etiquetas](docs/img/labels-pdf.png) |
+
+Decisões do M3:
+
+- **QR e etiquetas:**
+  - Saem para árvores com status `planted` e também `attention`, porque uma árvore em atenção continua plantada e mantém a placa.
+  - O PDF e os downloads usam a mesma geração (segno, nível H), e os testes decodificam o QR para conferir a URL.
+  - **O nome científico só vai para a etiqueta quando a espécie está “Revisado”**, porque a placa é permanente.
+- **Fotos:**
+  - O tipo é validado pelo conteúdo, não pela extensão. A imagem é rotacionada conforme o EXIF, reduzida para no máximo 1600 px e regravada como JPEG **sem nenhum metadado** (GPS, aparelho).
+  - A data da foto vem do EXIF quando existe.
+  - O limite de tamanho é `MAX_UPLOAD_MB`.
+- **Horários digitados no admin** (sem fuso) são tratados como horário de São Paulo e gravados em UTC.
+- **Exclusão de árvore:** só vale para muda aguardando plantio e sem histórico. Para árvore plantada que se perdeu, use o status “morta”, porque a placa pode já existir.
+- **Editor de polígono próprio**, de cerca de 100 linhas sobre o Leaflet, em vez do Leaflet.draw. Assim não depende de `window.L` global nem de ordem de carregamento de scripts.
+
+### API do admin (Bearer JWT)
+
+| Método | Rota |
+|---|---|
+| POST | `/api/admin/login` |
+| GET/POST | `/api/admin/trees` · GET/PATCH/DELETE `/api/admin/trees/{id}` |
+| POST | `/api/admin/trees/{id}/plant` (`planted_at`, `lat`, `lng`, `zone_id?`) |
+| GET/POST/DELETE | `/api/admin/trees/{id}/photos[/{photo_id}]` |
+| GET/POST/DELETE | `/api/admin/trees/{id}/care-events[/{event_id}]` |
+| GET | `/api/admin/trees/{id}/qr.png` · `/qr.svg` |
+| GET | `/api/admin/labels.pdf[?ids=1&ids=6]` |
+| GET/POST/PATCH/DELETE | `/api/admin/species[/{id}]` · POST `/api/admin/species/{id}/photo` |
+| GET/POST/PATCH | `/api/admin/origins[/{id}]` |
+| GET/PATCH | `/api/admin/zones[/{id}]` · PUT `/api/admin/zones/{id}/geojson` |
+| GET/POST/DELETE | `/api/admin/rain-events[/{id}]` |
+| GET/PATCH | `/api/admin/watering-rules[/{id}]` |
+
+Documentação interativa em `/docs`.
 
 ---
 

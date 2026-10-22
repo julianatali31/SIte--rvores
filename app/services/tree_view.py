@@ -70,7 +70,7 @@ async def _rules(session: AsyncSession) -> tuple[list[RuleSpec], dict]:
     return specs, {r.phase: r.is_placeholder for r in rows}
 
 
-async def _badge(session: AsyncSession, tree: Tree, now: datetime) -> BadgeOut:
+async def tree_badge(session: AsyncSession, tree: Tree, now: datetime) -> BadgeOut:
     settings = get_settings()
     tz = local_tz()
     watered = await last_watering_at(session, tree.id)
@@ -127,7 +127,7 @@ async def build_tree_out(session: AsyncSession, tree: Tree, now: datetime) -> Tr
     photos: list[PhotoOut] = []
     if planted:
         if tree.status in WATERABLE:
-            badge = await _badge(session, tree, now)
+            badge = await tree_badge(session, tree, now)
         rows = (
             await session.execute(
                 select(CareEvent)

@@ -27,6 +27,13 @@ def _valid_public_id(public_id: str) -> bool:
     return bool(_PUBLIC_ID_RE.match(public_id))
 
 
+@router.get("/api/config")
+async def public_config() -> dict:
+    settings = get_settings()
+    lat, lng = settings.map_center_latlng
+    return {"map_center": {"lat": lat, "lng": lng}, "map_zoom": settings.map_zoom, "base_url": settings.base_url}
+
+
 @router.get("/a/{public_id}", include_in_schema=False)
 async def tree_page(public_id: str, session: AsyncSession = Depends(get_session)):
     found = _valid_public_id(public_id) and await load_tree(session, public_id) is not None
