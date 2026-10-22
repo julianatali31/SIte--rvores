@@ -1,0 +1,15 @@
+# Direct dependencies, pinned. Full resolved set lives in requirements.lock.
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+sqlalchemy==2.0.36
+asyncpg==0.30.0
+alembic==1.14.0
+pydantic==2.10.4
+pydantic-settings==2.7.1
+argon2-cffi==23.1.0
+PyJWT==2.10.1
+segno==1.6.1
+reportlab==4.2.5
+pillow==11.1.0
+python-multipart==0.0.20
+tzdata==2024.2
