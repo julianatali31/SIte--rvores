@@ -88,15 +88,6 @@ def settings(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _reset_login_guard():
-    from app.core.auth import login_guard
-
-    login_guard._failures.clear()
-    yield
-    login_guard._failures.clear()
-
-
-@pytest.fixture(autouse=True)
 def _tmp_uploads(tmp_path, monkeypatch):
     from app.core.config import get_settings
 

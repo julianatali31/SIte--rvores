@@ -1,12 +1,9 @@
 """Photo processing: validate by content, fix rotation, resize, strip all metadata (EXIF/GPS)."""
 import io
-import uuid
 from datetime import datetime
-from pathlib import Path
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
-from app.core.config import get_settings
 from app.core.time import local_tz
 
 ALLOWED_FORMATS = {"JPEG", "PNG", "WEBP"}
@@ -57,21 +54,3 @@ def process_image(data: bytes) -> tuple[bytes, datetime | None]:
     # Re-encoding without passing exif= drops every metadata block.
     img.save(out, format="JPEG", quality=JPEG_QUALITY, optimize=True)
     return out.getvalue(), taken_at
-
-
-def save_image(data: bytes, folder: str) -> str:
-    """Writes under UPLOAD_DIR/<folder>/ and returns the relative path used in /media/."""
-    name = f"{uuid.uuid4().hex}.jpg"
-    target_dir = Path(get_settings().upload_dir) / folder
-    target_dir.mkdir(parents=True, exist_ok=True)
-    (target_dir / name).write_bytes(data)
-    return f"{folder}/{name}"
-
-
-def delete_image(relative_path: str | None) -> None:
-    if not relative_path:
-        return
-    root = Path(get_settings().upload_dir).resolve()
-    target = (root / relative_path).resolve()
-    if root in target.parents and target.is_file():
-        target.unlink()

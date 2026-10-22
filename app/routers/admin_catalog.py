@@ -9,7 +9,8 @@ from app.models import Origin, Species, Tree
 from app.routers.deps import commit_or_422, get_or_404
 from app.routers.uploads import read_upload
 from app.schemas.admin import OriginIn, OriginOut, OriginPatch, SpeciesIn, SpeciesOut, SpeciesPatch
-from app.services.photos import PhotoError, delete_image, process_image, save_image
+from app.services.photos import PhotoError, process_image
+from app.services.storage import delete_ref, get_storage
 
 router = APIRouter(prefix="/api/admin", tags=["admin"], dependencies=[Depends(current_admin)])
 
@@ -60,7 +61,7 @@ async def delete_species(species_id: int, session: AsyncSession = Depends(get_se
     photo = sp.photo_path
     await session.delete(sp)
     await commit_or_422(session)
-    delete_image(photo)
+    await delete_ref(photo)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -73,9 +74,9 @@ async def upload_species_photo(
         data, _ = process_image(await read_upload(file))
     except PhotoError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from None
-    old, sp.photo_path = sp.photo_path, save_image(data, "species")
+    old, sp.photo_path = sp.photo_path, await get_storage().save(data, "species")
     await commit_or_422(session)
-    delete_image(old)
+    await delete_ref(old)
     return await _species_out(session, sp)
 
 

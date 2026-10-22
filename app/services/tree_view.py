@@ -19,6 +19,7 @@ from app.schemas.public import (
     WateringOut,
 )
 from app.services import humanize
+from app.services.storage import media_url
 from app.services.watering import BadgeColor, RuleSpec, compute_badge, due_at, last_water, select_rule
 
 WATERABLE = {TreeStatus.PLANTED, TreeStatus.ATTENTION}
@@ -37,10 +38,6 @@ def _due_text(color: BadgeColor, due: datetime | None, tz) -> str | None:
         return None
     label = humanize.date_label(due, tz)
     return f"Rega atrasada desde {label}" if color == BadgeColor.RED else f"Próxima rega até {label}"
-
-
-def media_url(path: str | None) -> str | None:
-    return f"/media/{path}" if path else None
 
 
 async def load_tree(session: AsyncSession, public_id: str, *, for_update: bool = False) -> Tree | None:

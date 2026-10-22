@@ -22,9 +22,10 @@ from app.schemas.admin import (
     TreeOut,
     TreePatch,
 )
-from app.services.photos import PhotoError, delete_image, process_image, save_image
+from app.services.photos import PhotoError, process_image
 from app.services.qr import tree_url
-from app.services.tree_view import badges_for, media_url
+from app.services.storage import delete_ref, get_storage, media_url
+from app.services.tree_view import badges_for
 
 router = APIRouter(prefix="/api/admin/trees", tags=["admin"], dependencies=[Depends(current_admin)])
 
@@ -201,7 +202,7 @@ async def upload_photo(
     photo = Photo(
         tree_id=tree_id,
         taken_at=when,
-        file_path=save_image(data, "trees"),
+        file_path=await get_storage().save(data, "trees"),
         caption=(caption or "").strip() or None,
         uploaded_by_id=user.id,
     )
@@ -218,7 +219,7 @@ async def delete_photo(tree_id: int, photo_id: int, session: AsyncSession = Depe
     path = photo.file_path
     await session.delete(photo)
     await commit_or_422(session)
-    delete_image(path)
+    await delete_ref(path)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
