@@ -2,8 +2,8 @@
 
 Site do projeto de extensão do **IFSul Campus Passo Fundo**. Cada árvore plantada recebe uma placa com QR Code que leva a uma página pública, onde qualquer pessoa vê **quando a árvore foi regada pela última vez** e pode registrar uma rega na hora.
 
-> **Status:** M1 (esqueleto, modelo, seed), M2 (página pública, selo e registro de rega) e M3 (admin, chuva, QR e etiquetas) concluídos.
-> Próximo: M4 mapa público.
+> **Status:** M1 a M4 concluídos: modelo e seed; página pública com selo e registro de rega; admin com chuva, QR e etiquetas; mapa público.
+> Veja [Pendências](#pendências) para o que depende de informação externa.
 
 | Atrasada | Regada agora | Aguardando plantio |
 | :---: | :---: | :---: |
@@ -108,8 +108,29 @@ Função pura em `app/services/watering.py` (`compute_badge`), testada em `tests
 
 | Método | Rota | |
 |---|---|---|
+| GET | `/api/config` | Centro do mapa, zoom e `BASE_URL` |
+| GET | `/api/map/trees` | GeoJSON das árvores plantadas, com a cor do selo |
+| GET | `/api/map/zones` | GeoJSON das zonas que já têm polígono |
 | GET | `/api/trees/{public_id}` | Dados da página (selo, regas, fotos, espécie, origem) |
 | POST | `/api/trees/{public_id}/waterings` | `{"name": "Ana"}`. Responde 201, 409 (intervalo mínimo / árvore não plantada), 429 (rate limit) ou 404 |
+
+---
+
+## Mapa (`/mapa`)
+
+`/` redireciona para cá.
+
+| Visão geral | Card da árvore |
+| :---: | :---: |
+| ![Mapa](docs/img/map.png) | ![Card](docs/img/map-popup.png) |
+
+- **Camadas:** satélite (Esri World Imagery) e OpenStreetMap. No celular, o seletor vira um botão compacto.
+- **Enquadramento:** o mapa começa centralizado em `MAP_CENTER` e, quando há dados, se ajusta à zona e às árvores.
+- **Polígonos** das zonas, em amarelo.
+- **Um marcador por árvore plantada** (status `planted` ou `attention`), colorido pelo selo de rega. Mudas aguardando plantio e árvores mortas não aparecem. Os selos do mapa saem da mesma função da página da árvore, calculados em lote (número fixo de consultas).
+- **Card ao tocar no marcador:** espécie, código, selo e o botão “Ver árvore e registrar rega”.
+- **Lista abaixo do mapa,** com resumo (“4 árvores plantadas · 1 precisando de água”) e o botão “Ver no mapa”. Funciona também com leitor de tela ou quando os tiles não carregam.
+- **`/mapa#{public_id}`** abre direto o card daquela árvore. É o link “Abrir no mapa do campus” da página da árvore.
 
 ---
 
@@ -165,6 +186,33 @@ Documentação interativa em `/docs`.
 
 ---
 
+## Colocando no ar
+
+1. **Domínio definitivo e HTTPS** antes de imprimir qualquer placa (veja o aviso sobre a `BASE_URL`). O HTTPS também é exigido pelo “Usar minha posição” do admin.
+2. **Proxy reverso** (Caddy ou nginx) na frente da app, com HTTPS.
+   - Defina `FORWARDED_ALLOW_IPS` com o IP do proxy para que o rate limit veja o IP real de quem rega.
+   - Não exponha a porta 8000 diretamente.
+3. **Segredos:** gere `SECRET_KEY` e `IP_HASH_SALT` aleatórios e troque `ADMIN_PASSWORD`.
+   - Se o `IP_HASH_SALT` mudar, o rate limit apenas “esquece” os hashes antigos.
+4. **Backup** dos dois volumes: `pgdata` (banco) e `uploads` (fotos). Por exemplo, `docker compose exec db pg_dump -U arvores arvores > backup.sql` e uma cópia da pasta de uploads.
+5. **Um processo da app** (o padrão do compose). O bloqueio de login fica em memória; o rate limit das regas fica no banco e não depende disso.
+
+---
+
+## Pendências
+
+Itens que dependem de informação externa. O sistema funciona sem eles e mostra “em revisão” ou o aviso de placeholder.
+
+- [ ] **Intervalos de rega** (recém-plantada e estabelecida, e quando uma vira a outra): confirmar com NUGAI/Engenharia e marcar “confirmado” no admin.
+- [ ] **Dados das espécies** (descrição, porte, raiz, frutos, curiosidade) e confirmação dos nomes científicos: preencher e marcar “Revisado”.
+- [ ] **Data da doação** do Vale Natural Garden Center.
+- [ ] **`MAP_CENTER`** com a coordenada real do campus (hoje é um placeholder no centro de Passo Fundo).
+- [ ] **Polígono da Zona 1:** desenhar no admin ou importar GeoJSON.
+- [ ] **`BASE_URL`** definitiva.
+- [ ] **M5 (opcional):** chuva automática via Open-Meteo para `MAP_CENTER`. O modelo já está pronto (`rain_events.source = automatic`); falta o job e o limiar de milímetros, que também é decisão da NUGAI/Engenharia.
+
+---
+
 ## Modelo de dados
 
 | Tabela | Para quê |
@@ -204,7 +252,12 @@ app/
   seed.py
 alembic/     migrations
 tests/
-  services/  regras puras (selo, textos), rate limit, montagem da página
-  routers/   rotas HTTP
-web/         HTML/CSS/JS vanilla (ES modules), Leaflet 1.9.4 servido localmente em web/vendor
+  schemas/   Pydantic (entrada e saída da API)
+  services/  regras puras (selo, textos, GeoJSON), rate limit, fotos, QR, PDF, montagem da página
+  routers/   rotas HTTP (público, mapa, admin)
+web/
+  tree.html, map.html, admin/index.html
+  js/        ES modules (type="module"); js/admin/ é o SPA do admin
+  css/
+  vendor/    Leaflet 1.9.4 servido localmente (sem CDN)
 ```

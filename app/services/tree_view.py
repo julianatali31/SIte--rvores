@@ -70,14 +70,17 @@ async def _rules(session: AsyncSession) -> tuple[list[RuleSpec], dict]:
     return specs, {r.phase: r.is_placeholder for r in rows}
 
 
-async def tree_badge(session: AsyncSession, tree: Tree, now: datetime) -> BadgeOut:
+def _make_badge(
+    tree: Tree,
+    watered: datetime | None,
+    rain: datetime | None,
+    specs: list[RuleSpec],
+    placeholders: dict,
+    now: datetime,
+) -> BadgeOut:
     settings = get_settings()
     tz = local_tz()
-    watered = await last_watering_at(session, tree.id)
-    rain = await last_rain_at(session, now)
     water_at, source = last_water(watered, rain, tree.planted_at)
-
-    specs, placeholders = await _rules(session)
     rule = select_rule(tree.planted_at, now, specs)
     color = compute_badge(water_at, now, rule.interval_days, settings.badge_warn_ratio)
     due = due_at(water_at, rule.interval_days)
@@ -113,6 +116,26 @@ async def tree_badge(session: AsyncSession, tree: Tree, now: datetime) -> BadgeO
         interval_days=rule.interval_days,
         rule_is_placeholder=placeholders.get(rule.phase, True),
     )
+
+
+async def tree_badge(session: AsyncSession, tree: Tree, now: datetime) -> BadgeOut:
+    return (await badges_for(session, [tree], now))[tree.id]
+
+
+async def badges_for(session: AsyncSession, trees: list[Tree], now: datetime) -> dict[int, BadgeOut]:
+    """Badges for many trees with a fixed number of queries (map, admin list)."""
+    trees = [t for t in trees if t.status in WATERABLE]
+    if not trees:
+        return {}
+    rows = await session.execute(
+        select(CareEvent.tree_id, func.max(CareEvent.performed_at))
+        .where(CareEvent.tree_id.in_([t.id for t in trees]), CareEvent.type == CareEventType.WATERING)
+        .group_by(CareEvent.tree_id)
+    )
+    watered = dict(rows.all())
+    rain = await last_rain_at(session, now)
+    specs, placeholders = await _rules(session)
+    return {t.id: _make_badge(t, watered.get(t.id), rain, specs, placeholders, now) for t in trees}
 
 
 async def build_tree_out(session: AsyncSession, tree: Tree, now: datetime) -> TreeOut:

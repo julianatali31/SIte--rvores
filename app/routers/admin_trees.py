@@ -24,7 +24,7 @@ from app.schemas.admin import (
 )
 from app.services.photos import PhotoError, delete_image, process_image, save_image
 from app.services.qr import tree_url
-from app.services.tree_view import WATERABLE, media_url, tree_badge
+from app.services.tree_view import badges_for, media_url
 
 router = APIRouter(prefix="/api/admin/trees", tags=["admin"], dependencies=[Depends(current_admin)])
 
@@ -43,11 +43,10 @@ async def _load(session: AsyncSession, tree_id: int) -> Tree:
     return tree
 
 
-async def _out(session: AsyncSession, tree: Tree) -> TreeOut:
-    color = headline = None
-    if tree.status in WATERABLE:
-        badge = await tree_badge(session, tree, now_utc())
-        color, headline = badge.color, badge.headline
+async def _out(session: AsyncSession, tree: Tree, badges: dict | None = None) -> TreeOut:
+    if badges is None:
+        badges = await badges_for(session, [tree], now_utc())
+    badge = badges.get(tree.id)
     return TreeOut(
         id=tree.id,
         code=tree.code,
@@ -64,8 +63,8 @@ async def _out(session: AsyncSession, tree: Tree) -> TreeOut:
         lng=tree.lng,
         notes=tree.notes,
         public_url=tree_url(tree.public_id),
-        badge_color=color,
-        badge_headline=headline,
+        badge_color=badge.color if badge else None,
+        badge_headline=badge.headline if badge else None,
     )
 
 
@@ -87,7 +86,8 @@ async def list_trees(session: AsyncSession = Depends(get_session)):
             .order_by(Tree.code)
         )
     ).scalars().all()
-    return [await _out(session, t) for t in trees]
+    badges = await badges_for(session, list(trees), now_utc())
+    return [await _out(session, t, badges) for t in trees]
 
 
 @router.get("/{tree_id}", response_model=TreeOut)

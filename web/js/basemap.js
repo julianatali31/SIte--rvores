@@ -21,7 +21,9 @@ export function createBaseMap(container, { lat, lng }, zoom = 18, options = {}) 
     maxZoom: 21, maxNativeZoom: 19, attribution: '&copy; OpenStreetMap',
   });
   const map = L.map(container, { center: [lat, lng], zoom, maxZoom: 21, layers: [satellite], ...options });
-  L.control.layers({ 'Satélite': satellite, 'Mapa (OpenStreetMap)': streets }, null, { collapsed: false }).addTo(map);
+  // Expanded switcher on wide screens; a compact button on phones so it never covers popups.
+  const narrow = window.matchMedia('(max-width: 700px)').matches;
+  L.control.layers({ 'Satélite': satellite, 'Mapa (OpenStreetMap)': streets }, null, { collapsed: narrow }).addTo(map);
   L.control.scale({ imperial: false }).addTo(map);
   return map;
 }

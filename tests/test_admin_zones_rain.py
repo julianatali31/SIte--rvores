@@ -68,3 +68,17 @@ async def test_watering_rules_can_be_confirmed(admin):
     assert all(r["is_placeholder"] for r in rules)
     r = await admin.patch(f"/api/admin/watering-rules/{rules[0]['id']}", json={"interval_days": 3, "is_placeholder": False})
     assert r.json()["interval_days"] == 3 and r.json()["is_placeholder"] is False
+
+
+async def test_empty_polygon_is_sql_null(admin, seeded):
+    from sqlalchemy import text
+
+    async def is_sql_null():
+        return await seeded.scalar(text("SELECT polygon_geojson IS NULL FROM planting_zones"))
+
+    assert await is_sql_null()  # seed
+    zid = await _zone_id(admin)
+    await admin.patch(f"/api/admin/zones/{zid}", json={"polygon_geojson": {"type": "Polygon", "coordinates": [SQUARE]}})
+    await admin.patch(f"/api/admin/zones/{zid}", json={"polygon_geojson": None})
+    seeded.expire_all()
+    assert await is_sql_null()

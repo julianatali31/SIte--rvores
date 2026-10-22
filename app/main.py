@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.core.config import get_settings
@@ -12,6 +12,7 @@ from app.routers import (
     admin_labels,
     admin_trees,
     admin_zones,
+    campus_map,
     public,
 )
 
@@ -44,8 +45,14 @@ async def health() -> dict[str, str]:
 
 
 app.include_router(public.router)
+app.include_router(campus_map.router)
 for module in (admin_auth, admin_catalog, admin_trees, admin_zones, admin_care, admin_labels):
     app.include_router(module.router)
+
+
+@app.get("/", include_in_schema=False)
+async def home():
+    return RedirectResponse("/mapa")
 
 
 @app.get("/admin", include_in_schema=False)
