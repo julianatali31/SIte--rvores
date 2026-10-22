@@ -2,8 +2,12 @@
 
 Site do projeto de extensão do **IFSul Campus Passo Fundo**. Cada árvore plantada recebe uma placa com QR Code que leva a uma página pública, onde qualquer pessoa vê **quando a árvore foi regada pela última vez** e pode registrar uma rega na hora.
 
-> **Status:** M1 concluído (esqueleto, Docker Compose, modelo, migrations e seed).
-> Próximos: M2 página pública e rega, M3 admin, QR e etiquetas, M4 mapa.
+> **Status:** M1 (esqueleto, modelo, seed) e M2 (página pública, selo e registro de rega) concluídos.
+> Próximos: M3 admin, chuva manual, QR e etiquetas; M4 mapa.
+
+| Atrasada | Regada agora | Aguardando plantio |
+| :---: | :---: | :---: |
+| ![Selo vermelho](docs/img/tree-red.png) | ![Rega registrada](docs/img/tree-watered.png) | ![Muda aguardando local](docs/img/tree-awaiting.png) |
 
 ---
 
@@ -64,6 +68,49 @@ As dependências diretas estão fixadas em `requirements.txt`. O conjunto comple
 
 ---
 
+## Página pública da árvore (`/a/{public_id}`)
+
+- Foto, nome popular e científico, código e idade ("plantada há 12 dias").
+- **Selo de rega:** "Regada há 1 dia (ontem, 08:10)", em verde, amarelo, vermelho ou cinza. Tem sempre ícone e texto, nunca só a cor.
+- **Botão "Reguei agora"**, com nome opcional. A resposta do servidor já traz o selo atualizado.
+- Últimas regas, timeline de fotos, sobre a espécie (campos vazios aparecem como "informação em revisão"), origem e mini-mapa.
+- Árvore aguardando plantio mostra só "Esta muda ainda aguarda o local de plantio", sem selo. Árvore morta mostra uma mensagem própria.
+- Feita para o celular e para ler ao sol: tema claro, alto contraste, fonte grande e botão de rega com 72 px de altura.
+
+### Regra do selo
+
+Função pura em `app/services/watering.py` (`compute_badge`), testada em `tests/test_watering_badge.py`.
+
+| Cor | Quando |
+|---|---|
+| Cinza | Nenhum registro de rega ou chuva |
+| Verde | Tempo desde a última água < `BADGE_WARN_RATIO` × intervalo (padrão 75%) |
+| Amarelo | Entre 75% e 100% do intervalo |
+| Vermelho | Passou do intervalo |
+
+- **"Última água"** é a mais recente entre a última rega e a última chuva registrada (`rain_events`). Chuva anterior ao plantio não conta.
+- **O intervalo** vem de `watering_rules`: "recém-plantada" até `phase_until_days` após o plantio, "estabelecida" depois disso. **Os valores atuais são PLACEHOLDER: confirmar com NUGAI/Engenharia.**
+
+### Proteções do registro público de rega
+
+| Proteção | Como |
+|---|---|
+| Intervalo mínimo por árvore | `MIN_WATERING_INTERVAL_HOURS` (padrão 3 h). Responde 409 com "já foi regada às 08:10" e o selo atual. A linha da árvore é travada (`SELECT … FOR UPDATE`) para que duas regas simultâneas não passem juntas |
+| Rate limit por IP | `WATERING_RATE_LIMIT_COUNT` regas a cada `WATERING_RATE_LIMIT_WINDOW_MINUTES`. Responde 429 com `Retry-After`. A contagem fica no Postgres, então funciona com mais de um worker |
+| IP | Só o HMAC-SHA256 com `IP_HASH_SALT` é guardado, nunca o IP. Atrás de proxy reverso, configure `FORWARDED_ALLOW_IPS` |
+| Honeypot | Campo `website` escondido. Se vier preenchido, a resposta finge sucesso e nada é gravado |
+| Validação | Nome opcional com até 60 caracteres; caracteres de controle removidos |
+| Headers | CSP restritiva (só scripts do próprio site), `nosniff`, `Referrer-Policy` |
+
+### API pública
+
+| Método | Rota | |
+|---|---|---|
+| GET | `/api/trees/{public_id}` | Dados da página (selo, regas, fotos, espécie, origem) |
+| POST | `/api/trees/{public_id}/waterings` | `{"name": "Ana"}`. Responde 201, 409 (intervalo mínimo / árvore não plantada), 429 (rate limit) ou 404 |
+
+---
+
 ## Modelo de dados
 
 | Tabela | Para quê |
@@ -103,5 +150,7 @@ app/
   seed.py
 alembic/     migrations
 tests/
-web/         frontend (a partir do M2)
+  services/  regras puras (selo, textos), rate limit, montagem da página
+  routers/   rotas HTTP
+web/         HTML/CSS/JS vanilla (ES modules), Leaflet 1.9.4 servido localmente em web/vendor
 ```
